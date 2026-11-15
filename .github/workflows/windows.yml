@@ -2,13 +2,12 @@ name: Package PDF Forge for Windows
 on:
   push:
     branches: [main]
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       publish_preview:
         type: boolean
         default: false
-        description: Publish this build as GitHub prerelease v0.1.0
+        description: Publish this build as the versioned GitHub prerelease
 permissions:
   contents: read
 jobs:
@@ -27,7 +26,7 @@ jobs:
       - run: npm test
       - run: ./scripts/package-win.ps1
         shell: pwsh
-      - name: Open and render the sample PDF in the Windows executable
+      - name: Verify PDF, EPUB, CBZ and the file shelf in the Windows executable
         shell: pwsh
         run: |
           $exe = Resolve-Path 'out/PDF-Forge-win-x64/PDF Forge.exe'
@@ -38,9 +37,9 @@ jobs:
               if ($process.HasExited) { throw "PDF Forge exited with code $($process.ExitCode)" }
               Start-Sleep -Milliseconds 500
             }
-            if (!(Test-Path $env:PDF_FORGE_SMOKE_MARKER)) { throw 'The app did not report a rendered PDF.' }
+            if (!(Test-Path $env:PDF_FORGE_SMOKE_MARKER)) { throw 'The app did not report a completed reading test.' }
             $result = Get-Content $env:PDF_FORGE_SMOKE_MARKER -Raw
-            if ($result -ne 'Page 1 of 3') { throw $result }
+            if ($result -ne 'PDF, EPUB, CBZ and local shelf verified') { throw $result }
             Write-Output "Verified: $result"
           } finally {
             if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
@@ -51,10 +50,14 @@ jobs:
           path: out/PDF-Forge-Windows-x64.zip
           if-no-files-found: error
       - name: Publish downloadable Windows prerelease
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_preview && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.publish_preview)
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v0.1.0 out/PDF-Forge-Windows-x64.zip --target "${{ github.sha }}" --prerelease --title "PDF Forge 0.1.0 Windows Preview" --notes "Portable Windows x64 preview. Extract the entire ZIP and open PDF Forge.exe. This preview is unsigned. Includes PDF viewing, markup, page tools, local conversion, and appearance presets."
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = "v$version"
+          gh release view $tag --json tagName 2>$null
+          if ($LASTEXITCODE -eq 0) { Write-Output "Release $tag already exists."; exit 0 }
+          gh release create $tag out/PDF-Forge-Windows-x64.zip --target "${{ github.sha }}" --prerelease --title "PDF Forge $version Windows Preview" --notes "Portable Windows x64 preview. Extract the entire ZIP and open PDF Forge.exe. This build is unsigned. Read EPUB, FB2, CBZ, CBT, image archives and text documents, keep local copies on the File shelf, and continue using the PDF editing and conversion tools."
           if ($LASTEXITCODE -ne 0) { throw 'GitHub release was not published.' }

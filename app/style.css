@@ -45,3 +45,21 @@ dialog{border:1px solid var(--line);border-radius:15px;width:min(94vw,540px);bac
 .brand-art:before{content:"";position:absolute;inset:0 2% 0 14%;background:url("./art/forge-art.webp") center 52%/auto 98% no-repeat;mask-image:radial-gradient(ellipse 48% 73% at 55% 49%,#000 47%,transparent 100%)}
 .banner:after{background:linear-gradient(90deg,#261817 25%,#28191405 67%,#130d1055)}
 @media(max-width:610px){.brand-art{width:100%;opacity:.49}.brand-art:before{inset:0 -20% 0 24%}}
+
+/* File shelf and multi-format reader */
+.shelf-layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(240px,.85fr);gap:14px;align-items:start}
+.shelf-search{display:grid;grid-template-columns:minmax(0,1fr) minmax(105px,140px);gap:8px}
+.shelf-filters{margin:11px 0 15px}.shelf-filters .btn{font-size:12px}.shelf-space{margin-top:14px}
+.shelf-row{display:flex;align-items:center;gap:4px;padding:3px 0;border-bottom:1px solid var(--line)}
+.shelf-row:first-child{border-top:1px solid var(--line)}.shelf-row>.recent-item{flex:1}.shelf-row>.btn{margin-right:3px}
+.sample-list{display:grid;gap:6px}.sample-item{min-height:53px}
+.badge{color:var(--ink);background:var(--raised);border:1px solid var(--line);width:60px;min-width:60px;border-radius:7px;padding:6px 3px;white-space:nowrap;font-size:9px;letter-spacing:.02em;text-align:center;font-weight:800}
+.badge.pdf{background:#862f2a;color:#fff0e7;border-color:#a34a3c}.badge.book{background:#325451;color:#e1fff0;border-color:#48746b}.badge.comic{background:#523961;color:#f8eaff;border-color:#745788}.badge.image{background:#384d70;color:#e5eeff;border-color:#56709b}.badge.text{background:#624a2d;color:#fff6dc;border-color:#856440}
+.reading-bar{min-height:48px}.reading-select{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;margin-left:8px}.reading-select select{font-size:12px;padding:5px 6px;max-width:min(36vw,330px)}
+.reading-body{min-height:360px;height:calc(100dvh - 240px);overflow:auto;padding:20px;background:var(--wall);color:var(--muted)}
+.reading-body.comic,.reading-body.image{display:grid;place-items:start center}.reading-body>img{display:block;max-width:100%;max-height:calc(100dvh - 285px);object-fit:contain;box-shadow:0 14px 28px #0004}.reading-body.width-fit>img{width:100%;max-height:none;height:auto}
+.book-page,.text-file{max-width:770px;margin:0 auto;background:var(--surface);color:var(--ink);padding:clamp(16px,5vw,52px);border:1px solid var(--line);box-shadow:0 9px 20px var(--shadow);border-radius:6px;overflow-wrap:anywhere}
+.book-page{font-family:var(--serif);line-height:1.72}.book-page h1,.book-page h2,.book-page h3{line-height:1.12}.book-page p:first-child,.book-page h1:first-child,.book-page h2:first-child{margin-top:0}.book-page img{max-width:100%;max-height:65vh;object-fit:contain}.book-page table{max-width:100%;border-collapse:collapse}.book-page td,.book-page th{border:1px solid var(--line);padding:.25em}.book-page pre{white-space:pre-wrap}
+.book-link{color:var(--accent);text-decoration:underline;cursor:pointer}.text-file{white-space:pre-wrap;font:14px/1.68 ui-monospace,Consolas,monospace}.pinned-indicator{border:1px solid var(--line);padding:4px 8px;border-radius:7px}
+@media(max-width:850px){.shelf-layout{grid-template-columns:1fr}}
+@media(max-width:610px){.shelf-search{grid-template-columns:minmax(0,1fr) minmax(94px,110px)}.reading-body{padding:8px}.reading-select{margin-left:0}}

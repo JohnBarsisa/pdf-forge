@@ -1,6 +1,8 @@
 import * as js from './vendor/pdf.min.mjs';
 import {icon} from './icons.mjs';
 import * as pdf from './pdf-tools.mjs';
+import {TYPES,acceptFormats,extension,openFormat,chapterFragment,maxFileBytes} from './formats.mjs';
+import {listPins,getPin,setPin,removePin} from './shelf-store.mjs';
 const asset=p=>new URL(p,import.meta.url).href;
 js.GlobalWorkerOptions.workerSrc=asset('./vendor/pdf.worker.min.mjs');
 const $=sel=>document.querySelector(sel), desktop=window.forgeDesktop;
@@ -21,7 +23,23 @@ compress:['Compress PDFs','Lossless PDF rewrite','#b6a2ff']
 const palettes=[['ember','Ember','#f78b5e'],['copper','Copper','#dda36b'],['crimson','Crimson','#d35678'],['aubergine','Aubergine','#b485d4'],['forest','Forest','#63ae82'],['olive','Olive','#aab65b']];
 let prefs={mode:'dark',palette:'ember',density:'comfortable',...read('appearance',{})}, recent=read('recent',[]).filter(x=>x.name!=='Summit Field Notes.pdf');
 let area='home', docs=[], active=null, queue=[], queueKind='pdf', tool='', draft='', token=0, readerJob, drawing=null, pageView=null;
-let thumbsObserver;
+let thumbsObserver, readingUrls=[], shelfFilter='all', shelfQuery='', shelfSort='name', pins=[];
+let progress=read('reading-progress',[]);
+const sampleFiles={
+  pdf:['Summit Field Notes.pdf','./art/summit-field-notes.pdf','Field report · 3 pages'],
+  epub:['The Lantern Ridge.epub','./art/lantern-ridge.epub','Illustrated ebook · 3 chapters'],
+  cbz:['Signal at Dusk.cbz','./art/signal-at-dusk.cbz','Original comic · 3 pages']
+};
+const kind=d=>TYPES[d?.format]||TYPES.pdf;
+const pdfActive=()=>active?.format==='pdf'?active:null;
+const docKey=d=>JSON.stringify([d.name,d.originalSize,d.modified||0]);
+const atProgress=d=>progress.find(x=>x.id===docKey(d))?.page||1;
+function setProgress(d) {
+  const id=docKey(d);progress=[{id,page:d.page},...progress.filter(x=>x.id!==id)].slice(0,100);
+  persist('reading-progress',progress);
+}
+const openCount=d=>d.format==='pdf'?d.doc.numPages:d.groups.length;
+const pinned=d=>pins.find(x=>x.id===d.pinId||x.key===docKey(d));
 let zoom=1, query='', matches=[], matchIndex=0, busy=false, toastTimer, dragDepth=0;
 const screen=$('#screen'), dlg=$('#dialog'), picker=$('#picker');
 const btn=(label,action,i='',cls='',disabled=false)=>'<button type="button" class="btn '+cls+'" data-action="'+action+'" '+(disabled?'disabled':'')+'>'+ (i?icon(i):'') +'<span>'+label+'</span></button>';
@@ -36,16 +54,76 @@ function notify(message){const t=$('#toast');t.textContent=message;t.hidden=fals
 function appearance(){const system=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';Object.assign(document.documentElement.dataset,{mode:prefs.mode==='system'?system:prefs.mode,palette:prefs.palette,density:prefs.density});persist('appearance',prefs);}
 matchMedia('(prefers-color-scheme: light)').addEventListener('change',appearance);appearance();
 function chrome(){
-  $('#main-nav').innerHTML='<div class="nav-label">WORKSPACE</div>'+nav('Home','home','home',area==='home')+Object.entries(tools).map(([id,[label]])=>nav(label,'route:'+id,id,area===id)).join('');
+  $('#main-nav').innerHTML='<div class="nav-label">WORKSPACE</div>'+nav('Home','home','home',area==='home')+nav('File shelf','shelf','open',area==='shelf')+nav('Reader','files','view',(area==='files'||area==='view'))+'<div class="nav-label">PDF TOOLS</div>'+Object.entries(tools).map(([id,[label]])=>nav(label,'route:'+id,id,area===id)).join('');
   $('#side-end').innerHTML=nav('Appearance','theme','settings',area==='theme')+nav('Help','help','help',area==='help');
-  $('#crumb').textContent=tools[area]?.[0]||({home:'Overview',theme:'Appearance',help:'Help'}[area]||area);
-  $('#bar-tools').innerHTML=ib('Appearance settings','theme','sun')+btn('Open PDF','open','open','shortcut');
+  $('#crumb').textContent=tools[area]?.[0]||({home:'Overview',theme:'Appearance',help:'Help',shelf:'File shelf',files:'Reader'}[area]||area);
+  $('#bar-tools').innerHTML=ib('Appearance settings','theme','sun')+btn('Open files','open','open','shortcut');
+}
+function samples(){
+  return '<div class="sample-list">'+Object.entries(sampleFiles).map(([k,[name,,detail]])=>
+    '<button class="recent-item sample-item" data-action="sample:'+k+'"><span class="badge '+TYPES[k].group+'">'+TYPES[k].name+'</span><span><b>'+name+'</b><small>'+detail+'</small></span><i>'+icon('right')+'</i></button>').join('')+'</div>';
 }
 function home(){
-  const rec=recent.map((r,i)=>'<button class="recent-item" data-action="recent:'+i+'">'+icon('file')+'<span><b>'+esc(r.name)+'</b><small>'+esc(r.meta)+'</small></span><i>'+icon('right')+'</i></button>').join('');
-  return '<section class="banner"><div class="brand-art" aria-hidden="true"></div><div class="banner-copy"><p class="eyebrow">PDF FORGE · LOCAL-FIRST STUDIO</p><h1>Make every PDF<br>your own.</h1><p>Read, edit and convert in one quiet workspace. Your documents stay on your device.</p><div class="row">'+btn('Open PDF','open','open','primary')+btn('Try sample','sample','view')+'</div></div></section>'+
-    '<div class="section-head"><h2>Quick tools</h2><span>Drag a PDF here anytime <kbd>Ctrl O</kbd></span></div><div class="cards">'+Object.entries(tools).map(([id,v])=>card(id,v)).join('')+'</div>'+
-    '<div class="lower"><section class="panel"><div class="panel-head"><h2 class="panel-title">Recent files</h2>'+ (recent.length?btn('Clear','clear-recent','','ghost panel-action'):'<span class="meta">This device</span>')+'</div><div class="panel-body">'+(rec||'<p class="overview-note">Files you open appear here during this session. Only their names and sizes are remembered afterward.</p>')+'<button class="recent-item" data-action="sample">'+icon('file')+'<span><b>Summit Field Notes.pdf</b><small>Sample document · 3 pages</small></span></button></div></section><section class="panel"><div class="panel-head"><h2 class="panel-title">Sample workspace</h2>'+btn('Open sample','sample','right','ghost panel-action')+'</div><div class="preview-paper"><div class="sample-thumbs" aria-hidden="true"><i></i><i></i><i></i></div><canvas id="sample-preview" aria-label="Preview of Summit Field Notes PDF"></canvas></div></section></div>';
+  return '<section class="banner"><div class="brand-art" aria-hidden="true"></div><div class="banner-copy"><p class="eyebrow">PDF FORGE · LOCAL FILE WORKSPACE</p><h1>Open more.<br>Keep it local.</h1><p>Work on PDFs, read ebooks and comics, and keep the files you want to revisit on one shelf.</p><div class="row">'+btn('Open files','open','open','primary')+btn('File shelf','shelf','open')+'</div></div></section>'+
+    '<div class="section-head"><h2>PDF tools</h2><span>Drop a file to open it <kbd>Ctrl O</kbd></span></div><div class="cards">'+Object.entries(tools).map(([id,v])=>card(id,v)).join('')+'</div>'+
+    '<div class="lower">'+pane('Try a sample',samples())+'<section class="panel"><div class="panel-head"><h2 class="panel-title">Sample workspace</h2>'+btn('Open sample PDF','sample:pdf','right','ghost panel-action')+'</div><div class="preview-paper"><div class="sample-thumbs" aria-hidden="true"><i></i><i></i><i></i></div><canvas id="sample-preview" aria-label="Preview of Summit Field Notes PDF"></canvas></div></section></div>';
+}
+function shelfRows(){
+  const query=shelfQuery.trim().toLocaleLowerCase(), rows=[];
+  for(const [i,d] of docs.entries())rows.push({name:d.name,kind:kind(d),action:'tab:'+i,status:d.sample?'Sample open':'Open now',meta:size(d.originalSize),extra:!d.sample?(pinned(d)?'unpin:'+pins.indexOf(pinned(d)):'pin:'+i):''});
+  for(const [i,m] of pins.entries())if(!docs.some(d=>docKey(d)===m.key))rows.push({name:m.name,kind:TYPES[m.format],action:'pin-open:'+i,status:'Pinned · resume reading',meta:size(m.size),extra:'unpin:'+i});
+  for(const [i,r] of recent.entries())if(!docs.some(d=>d.name===r.name)&&!pins.some(d=>d.name===r.name))
+    rows.push({name:r.name,kind:TYPES[r.format||extension(r.name)]||TYPES.pdf,action:'recent:'+i,status:'Recent · needs re-opening',meta:r.meta||''});
+  const filtered=rows.filter(r=>(shelfFilter==='all'||r.kind?.group===shelfFilter)&&(!query||r.name.toLocaleLowerCase().includes(query)));
+  if(shelfSort==='name')filtered.sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
+  if(shelfSort==='kind')filtered.sort((a,b)=>a.kind.name.localeCompare(b.kind.name)||a.name.localeCompare(b.name));
+  return filtered.length?filtered.map(r=>'<div class="shelf-row"><button class="recent-item" data-action="'+r.action+'"><span class="badge '+r.kind.group+'">'+r.kind.name+'</span><span><b>'+esc(r.name)+'</b><small>'+esc(r.status)+' · '+esc(r.meta)+'</small></span><i>'+icon('right')+'</i></button>'+(r.extra?ib(r.extra.startsWith('pin:')?'Pin this file':'Remove stored copy',r.extra,r.extra.startsWith('pin:')?'plus':'delete'):'')+'</div>').join(''):'<p class="overview-note">No matching files. Open a file or try one of the samples.</p>';
+}
+function shelf(){
+  return title('File shelf','Find open, recent and pinned files. Your originals stay where they are.',btn('Open files','open','open','primary'))+
+   '<div class="shelf-layout">'+pane('Your files','<div class="shelf-search"><input id="shelf-search" class="input" type="search" aria-label="Search filenames" value="'+esc(shelfQuery)+'" placeholder="Search filenames"><select id="shelf-sort" aria-label="Sort files"><option value="name">By name</option><option value="kind" '+(shelfSort==='kind'?'selected':'')+'>By format</option></select></div><div class="choices shelf-filters">'+[['all','All'],['pdf','PDFs'],['book','Ebooks'],['comic','Comics'],['text','Text'],['image','Images']].map(([v,l])=>'<button class="btn '+(v===shelfFilter?'active':'')+'" data-action="filter:'+v+'" aria-pressed="'+(v===shelfFilter)+'">'+l+'</button>').join('')+'</div><div id="shelf-rows">'+shelfRows()+'</div>'+(recent.length?'<div class="actions">'+btn('Clear recent list','clear-recent','','ghost')+'</div>':''))+
+   '<div>'+pane('Try a sample',samples())+'<div class="shelf-space">'+pane('Formats you can open','<p class="hint"><strong>Documents:</strong> PDF, DOCX (text preview), TXT, Markdown, CSV, TSV, JSON and logs.<br><strong>Books:</strong> EPUB and FB2.<br><strong>Comics:</strong> CBZ, CBT and ZIP with page images.<br><strong>Images:</strong> PNG, JPEG, GIF, WebP, AVIF and BMP.</p><p class="hint">DRM and CBR/CB7 are not supported. Pinning keeps a copy in this app, not in a cloud account.</p>')+'</div></div></div>';
+}
+function tabStrip(d){
+  return '<div class="tabs" aria-label="Open files">'+docs.map((x,i)=>'<div class="tab '+(x===d?'active':'')+'"><button data-action="tab:'+i+'" title="'+esc(x.name)+'">'+esc(x.name)+(x.dirty?' •':'')+'</button>'+ib('Close '+esc(x.name),'close-tab:'+i,'close')+'</div>').join('')+'</div>';
+}
+function pinControl(d){
+  if(d.sample)return '';
+  const match=pinned(d);
+  return match?'<span class="meta pinned-indicator">Pinned</span>':btn('Pin to shelf','pin:'+docs.indexOf(d),'plus','ghost');
+}
+function fileReader(){
+  if(!active||active.format==='pdf')return tabStrip(active)+title('Reader','Open an ebook, comic, image, text file or PDF.')+drop('Open files','open','Drop supported files or choose them on this device.')+'<div class="shelf-space">'+pane('Try a sample',samples())+'</div>';
+  const d=active,k=kind(d), total=d.groups.length, isBook=k.group==='book', isComic=k.group==='comic', name=d.title||d.name;
+  const controls=total>1?ib('Previous '+(isBook?'chapter':'page'),'item-prev','left',d.page<=1)+'<span class="meta">'+d.page+' / '+total+'</span>'+ib('Next '+(isBook?'chapter':'page'),'item-next','right',d.page>=total):'';
+  const toc=total>1?'<label class="reading-select"><span>'+(isBook?'Chapter':'Page')+'</span><select id="reader-jump" aria-label="'+(isBook?'Jump to chapter':'Jump to page')+'">'+d.groups.map((e,i)=>'<option value="'+(i+1)+'" '+(i+1===d.page?'selected':'')+'>'+esc(e.title)+'</option>').join('')+'</select></label>':'';
+  const sizing=isBook?ib('Smaller text','reader-size:down','minus')+'<span class="meta">'+Math.round(d.scale*100)+'%</span>'+ib('Larger text','reader-size:up','plus'):isComic||k.group==='image'?'<label class="reading-select"><span>Fit</span><select id="reader-fit" aria-label="Image size"><option value="page">Fit page</option><option value="width" '+(d.fit==='width'?'selected':'')+'>Fit width</option></select></label>':'';
+  return tabStrip(d)+title(esc(name),esc([k.name,d.byline,d.title?d.name:'',size(d.originalSize)].filter(Boolean).join(' · ')),pinControl(d))+
+   '<section class="tools-shell"><div class="toolbar reading-bar">'+controls+toc+'<span class="spacer"></span>'+sizing+'</div><div id="reading-body" class="reading-body '+k.group+' '+(d.fit==='width'?'width-fit':'')+'" aria-busy="true" tabindex="0"></div><div class="read-status"><span id="file-status" role="status">Opening…</span><span>Read only · Local file</span></div></section>';
+}
+async function paintFile(d,stamp){
+  const body=$('#reading-body'), status=$('#file-status');if(!body||!status)return;
+  const item=d.groups[d.page-1], k=kind(d), bg=k.group;
+  const asURL=(data,mime)=>{
+    if(stamp!==token)return null;
+    const u=URL.createObjectURL(new Blob([data],{type:mime}));readingUrls.push(u);return u;
+  };
+  try{
+    if(bg==='book'){
+      const html=await chapterFragment(d,d.page-1,document,asURL);if(stamp!==token)return;
+      const article=document.createElement('article');article.className='book-page';article.style.fontSize=d.scale+'rem';article.append(html);body.append(article);
+    }else if(bg==='text'){
+      const pre=document.createElement('pre');pre.className='text-file';pre.textContent=item.text;body.append(pre);
+    }else{
+      const bytes=item.data||await d.arc.read(item.path);
+      if(stamp!==token)return;
+      const im=document.createElement('img');im.alt=bg==='comic'?'Comic page '+d.page:d.name;
+      im.src=asURL(bytes,item.mime||TYPES[extension(item.path)].mime);
+      await im.decode();if(stamp!==token)return;body.append(im);
+    }
+    status.textContent=bg==='comic'?'Page '+d.page+' of '+d.groups.length:bg==='book'?'Chapter '+d.page+' of '+d.groups.length:'Preview ready';
+  }catch(e){if(stamp===token){status.textContent=e.message;body.textContent='This item could not be previewed.';}}
+  finally{if(stamp===token)body.removeAttribute('aria-busy');}
 }
 let sampleDoc;
 async function samplePreview(){const canvas=$('#sample-preview');if(!canvas)return;try{sampleDoc ||= (await loadJS(new Uint8Array(await (await fetch(asset('./art/summit-field-notes.pdf'))).arrayBuffer()))).doc;const p=await sampleDoc.getPage(1);if(canvas.isConnected)await renderCanvas(p,canvas,0.85,1.5)}catch(e){console.warn(e)}}
@@ -56,36 +134,38 @@ function setting(){
     '<div class="setting-row"><strong>Toolbar spacing</strong><div class="choices">'+[['comfortable','Comfortable'],['compact','Compact']].map(([id,label])=>btn(label,'density:'+id,'',prefs.density===id?'active':'')).join('')+'</div></div>'+btn('Restore defaults','reset-theme','undo','ghost'));
 }
 function toolPage(){
-  const add=btn('Add files','queue-picker','plus'), a=active?'<div class="field"><strong>Current document</strong><span class="muted">'+dname()+'</span></div>':'';
+  const active=pdfActive();
+  const a=active?'<div class="field"><strong>Current document</strong><span class="muted">'+dname()+'</span></div>':'';
   const list='<div class="file-list">'+queue.map((f,i)=>'<div class="file-row">'+icon('file')+'<span>'+esc(f.name)+' <small class="muted">'+size(f.size)+'</small></span>'+ib('Move up','queue-up:'+i,'up',!i)+ib('Move down','queue-down:'+i,'down',i===queue.length-1)+ib('Remove file','queue-remove:'+i,'close')+'</div>').join('')+'</div>';
   let content='', side='';
   if(area==='merge'){
     content=pane('Merge multiple PDFs',drop('Add PDFs to merge','queue-picker','Files are merged in the listed order.')+list+'<div class="actions">'+btn('Merge and save','merge-run','merge','primary',queue.length<2)+(active?btn('Add open PDF','queue-current','plus'):'')+'</div>');
-    side=pane('Extract pages from one PDF',a+(active?'<label class="field">Page range<input id="range" placeholder="1, 3-5" value="1"></label>'+btn('Save extracted pages','extract-run','out','primary'):btn('Open a PDF','open','open','primary'))+'<p class="hint">Rotate, reorder or delete individual pages in the reader.</p>');
+    side=pane('Extract pages from one PDF',a+(active?'<label class="field">Page range<input id="range" placeholder="1, 3-5" value="1"></label>'+btn('Save extracted pages','extract-run','out','primary'):btn('Open a PDF','open-pdf','open','primary'))+'<p class="hint">Rotate, reorder or delete individual pages in the reader.</p>');
   }else if(area==='in'){
     content=pane('Images and text',drop('Add files to convert','queue-picker','JPG, PNG, TXT and Markdown')+list+btn('Create PDF','from-run','in','primary',!queue.length));
     side=pane('Office documents','<p class="hint">DOCX, XLSX, PPTX and OpenDocument import uses your local LibreOffice installation. Markdown is imported as plain text.</p>'+(desktop?btn('Convert Office document','office','in','primary'):'<p class="hint"><strong>Desktop only.</strong> No cloud converter is used.</p>'));
   }else if(area==='convert'||area==='out'){
     const word=area==='out';
-    content=pane('Export from PDF',a+(active?'<label class="field">Output format<select id="format">'+(word?'<option value="docx">Word (.docx) · text only</option>':'')+'<option value="txt">Plain text (.txt)</option><option value="png">Current page (.png)</option><option value="jpg">Current page (.jpg)</option></select></label>'+btn('Export','export-run','out','primary'):btn('Open a PDF to export','open','open','primary')));
+    content=pane('Export from PDF',a+(active?'<label class="field">Output format<select id="format">'+(word?'<option value="docx">Word (.docx) · text only</option>':'')+'<option value="txt">Plain text (.txt)</option><option value="png">Current page (.png)</option><option value="jpg">Current page (.jpg)</option></select></label>'+btn('Export','export-run','out','primary'):btn('Open a PDF to export','open-pdf','open','primary')));
     side=pane('What to expect','<p class="hint">Text and Word export use the embedded text layer. Scans need OCR, which is not included yet. Complex layouts, images and font styling are not recreated in Word.</p>');
   }else{
-    content=pane('Lossless optimization',a+(active?btn('Optimize and save','compact-run','compress','primary'):btn('Open a PDF','open','open','primary'))+'<p class="hint">Rewrites PDF structure without downsampling images. If it cannot make the file smaller, no replacement is saved.</p>');
+    content=pane('Lossless optimization',a+(active?btn('Optimize and save','compact-run','compress','primary'):btn('Open a PDF','open-pdf','open','primary'))+'<p class="hint">Rewrites PDF structure without downsampling images. If it cannot make the file smaller, no replacement is saved.</p>');
     side=pane('Your original stays intact','<p class="hint">PDF Forge exports a copy. This pass does not promise savings on already optimized documents.</p>');
   }
   return title(tools[area][0],tools[area][1]+' · Processed on this device')+'<div class="tool-page">'+content+side+'</div>';
 }
 function help(){return title('Help & shortcuts','The same workspace runs in your browser and the Windows app.')+
   pane('Keyboard shortcuts','<p><kbd>Ctrl O</kbd> Open · <kbd>Ctrl S</kbd> Save a copy · <kbd>Ctrl F</kbd> Find text · <kbd>Ctrl Z</kbd> Undo · <kbd>Ctrl Shift Z</kbd> Redo</p><p><kbd>←</kbd> <kbd>→</kbd> Previous / next page · <kbd>Esc</kbd> Cancel annotation</p>')+
-  '<br>'+pane('What is included','<p>Read, annotate, assemble and export PDFs locally. The Sign tool creates a visual mark, not a cryptographic signature. Exports may invalidate existing digital signatures.</p><p>Existing-text reflow, OCR, redaction, encryption and layout-preserving Word export are not part of this preview.</p><p><a href="./privacy.html">Privacy and third-party notices</a></p>');}
+  '<br>'+pane('Your file shelf','<p>Open EPUB or FB2 ebooks, CBZ/CBT comics, images and text documents. Pin a local copy to reopen later. Reading position is remembered per file. PDF editing and conversion remain in the PDF tools.</p>')+'<br>'+pane('What is included','<p>Read, annotate, assemble and export PDFs locally. The Sign tool creates a visual mark, not a cryptographic signature. Exports may invalidate existing digital signatures.</p><p>Existing-text reflow, OCR, redaction, encryption and layout-preserving Word export are not part of this preview.</p><p><a href="./privacy.html">Privacy and third-party notices</a></p>');}
 function reader(){
-  if(!active)return title(tools[area][0],tools[area][1])+drop('Open a PDF','open','Choose a file or drop it into the workspace.')+'<div class="actions">'+btn('Try the sample','sample','view')+'</div>';
+  const active=pdfActive();
+  if(!active)return tabStrip(null)+title(tools[area][0],tools[area][1])+drop('Open a PDF','open-pdf','Choose a file or drop it into the workspace.')+'<div class="actions">'+btn('Try the sample','sample:pdf','view')+'</div>';
   const d=active,n=d.doc.numPages,p=d.page, edit=area==='edit'||area==='sign';
-  const tabs='<div class="tabs" aria-label="Open documents">'+docs.map((x,i)=>'<div class="tab '+(x===d?'active':'')+'"><button data-action="tab:'+i+'" title="'+esc(x.name)+'">'+esc(x.name)+(x.dirty?' •':'')+'</button>'+ib('Close '+esc(x.name),'close-tab:'+i,'close')+'</div>').join('')+'</div>';
+  const tabs=tabStrip(d);
   const marks=edit&&!d.encrypted?btn('Add text','mark:text','edit',tool==='text'?'active':'')+btn('Highlight','mark:highlight','highlight',tool==='highlight'?'active':'')+btn('Pen','mark:ink','ink',tool==='ink'?'active':'')+btn('Signature','mark:signature','sign',tool==='signature'?'active':'')+ib('Undo','undo','undo',!d.undo.length)+ib('Redo','redo','redo',!d.redo.length):'';
   const pageOps=d.encrypted?'':ib('Rotate page','change:rotate','rotate')+ib('Move page earlier','change:up','up',p<=1)+ib('Move page later','change:down','down',p>=n)+ib('Delete page','delete-page','delete',n<=1);
   const hint=tool?'<div class="tool-hint">'+(tool==='text'||tool==='signature'?'Click the page to place your '+(tool==='text'?'text.':'visual signature.'):'Drag over the page to draw. Press Esc to exit.')+ib('Cancel placement','cancel-mark','close')+'</div>':d.encrypted?'<div class="tool-hint">Password-protected document · View and export only</div>':'';
-  return tabs+title(dname(),n+' '+(n===1?'page':'pages')+' · '+size(d.raw.length)+(d.dirty?' · Unsaved edits':''),btn('Save copy','save','save','primary'))+
+  return tabs+title(dname(),n+' '+(n===1?'page':'pages')+' · '+size(d.raw.length)+(d.dirty?' · Unsaved edits':''),pinControl(d)+btn('Save copy','save','save','primary'))+
    '<div class="tools-shell"><div class="toolbar">'+ib('Previous page','prev','left',p<=1)+'<span class="meta" id="page-counter">'+p+' / '+n+'</span>'+ib('Next page','next','right',p>=n)+ib('Zoom out','zoom-out','minus')+btn(Math.round(zoom*100)+'%','fit','','ghost')+ib('Zoom in','zoom-in','plus')+ib('Find text','find','search')+ib('Print all pages','print','print')+(edit?'':'<span class="spacer"></span>')+pageOps+marks+'</div>'+hint+
    '<div class="viewer"><div class="thumb-list" aria-label="Pages">'+Array.from({length:n},(_,i)=>'<button class="thumb" data-action="page:'+(i+1)+'" aria-label="Page '+(i+1)+'" aria-current="'+(i+1===p)+'"><canvas data-thumb="'+(i+1)+'" aria-hidden="true"></canvas><span>'+(i+1)+'</span></button>').join('')+'</div><div class="viewport" tabindex="0" aria-label="Document viewport"><div class="canvas-wrap '+(tool==='text'||tool==='signature'?'placing':tool?'drawing':'')+'"><canvas id="pdf-page" role="img" aria-label="PDF page '+p+'"></canvas><canvas id="ink-layer" aria-hidden="true"></canvas></div></div></div><div class="read-status"><span id="read-status" role="status">Rendering page '+p+'…</span><span>Local file · No upload</span></div></div>';
 }
@@ -93,15 +173,17 @@ function display(){
   chrome();token++;const stamp=token;
   if(readerJob){readerJob.cancel();readerJob=null}
   thumbsObserver?.disconnect();
+  readingUrls.forEach(u=>URL.revokeObjectURL(u));readingUrls=[];
   pageView=null;drawing=null;
   const reading=['view','edit','sign'].includes(area);
-  screen.innerHTML=area==='home'?home():area==='theme'?setting():area==='help'?help():reading?reader():toolPage();
+  screen.innerHTML=area==='home'?home():area==='theme'?setting():area==='help'?help():area==='shelf'?shelf():area==='files'?fileReader():reading?reader():toolPage();
   if(area==='home')void samplePreview();
-  if(reading&&active)void renderReader(active,stamp);
+  if(reading&&pdfActive())void renderReader(active,stamp);
+  if(area==='files'&&active&&active.format!=='pdf')void paintFile(active,stamp);
 }
 const fileTokens={pdf:'.pdf,application/pdf',source:'.jpg,.jpeg,.png,.txt,.md,image/jpeg,image/png,text/plain'};
 let pickMode='open';
-function choose(mode){pickMode=mode;picker.value='';picker.accept=fileTokens[mode==='source'?'source':'pdf'];picker.click();}
+function choose(mode){pickMode=mode;picker.value='';picker.accept=mode==='open'?acceptFormats:fileTokens[mode==='source'?'source':'pdf'];picker.click();}
 async function loadJS(data){
   const task=js.getDocument({data:data.slice(),cMapUrl:asset('./vendor/cmaps/'),cMapPacked:true,standardFontDataUrl:asset('./vendor/standard_fonts/'),wasmUrl:asset('./vendor/wasm/'),isEvalSupported:false,enableXfa:false});
   let encrypted=false;
@@ -133,28 +215,60 @@ async function renderReader(d,stamp){
     for(const el of thumbs?.querySelectorAll('canvas')||[])observer.observe(el);
   }catch(e){if(stamp===token&&e.name!=='RenderingCancelledException'){const x=$('#read-status');if(x)x.textContent='Could not render this page.';console.warn(e)}}
 }
-function remember(name,n){recent=[{name,meta:size(n)+' · Local file'},...recent.filter(r=>r.name!==name)].slice(0,6);persist('recent',recent);}
-async function openBytes(name,raw){
-  const result=await loadJS(raw);
-  const next={...result,name,raw,page:1,undo:[],redo:[],dirty:false};
-  docs.push(next);active=next;if(name!=='Summit Field Notes.pdf')remember(name,raw.length);
+function remember(d){
+  recent=[{name:d.name,format:d.format,meta:size(d.originalSize)},...recent.filter(r=>r.name!==d.name)].slice(0,16);persist('recent',recent);
 }
-async function openFiles(files){
-  if(!files.length)return;
-  let failures=[];
-  for(const f of files){try{if(!/\.pdf$/i.test(f.name)&&f.type!=='application/pdf')throw new Error('Choose a PDF file.');await openBytes(f.name,await pdf.bytes(f));}catch(e){failures.push(f.name+': '+(e.message||'Could not open PDF.'));}}
-  if(active){area=['edit','sign','merge','convert','out','compress'].includes(area)?area:'view';tool='';resetSearch();}
-  display();if(failures.length)notify(failures.join(' · '));
+async function openOne(file, opts={}){
+  if(file.size>maxFileBytes)throw new Error('This file is larger than 256 MB.');
+  const name=file.name, ext=extension(name);
+  if(!TYPES[ext])throw new Error(['cbr','cb7','cba','rar','7z'].includes(ext)?'Use a CBZ or CBT comic. This archive format is not supported yet.':'This file type is not supported. Open File shelf to see supported formats.');
+  const raw=await pdf.bytes(file);
+  if(!raw.length)throw new Error('This file is empty.');
+  const next=ext==='pdf'?{...await loadJS(raw),format:'pdf',raw,undo:[],redo:[],dirty:false}:await openFormat(raw,name);
+  Object.assign(next,{name,originalSize:file.size,modified:file.lastModified||0,source:file,sample:!!opts.sample,pinId:opts.pinId,page:1,scale:1.15,fit:'page'});
+  next.page=Math.min(openCount(next),atProgress(next));
+  docs.push(next);active=next;if(!opts.sample)remember(next);
+  return next;
 }
-async function sample(){
-  const found=docs.find(d=>d.name==='Summit Field Notes.pdf'&&d.sample);
-  if(found)active=found;
-  else {const res=await fetch(asset('./art/summit-field-notes.pdf'));if(!res.ok)throw new Error('The sample could not load.');await openBytes('Summit Field Notes.pdf',new Uint8Array(await res.arrayBuffer()));active.sample=true;}
-  area=['edit','sign'].includes(area)?area:'view';resetSearch();display();
+function showDoc(d,preservePDF=false){
+  active=d;tool='';resetSearch();
+  area=d.format!=='pdf'?'files':preservePDF&&['edit','sign','merge','convert','out','compress'].includes(area)?area:'view';
+  display();
+}
+let importing=false;
+async function openFiles(files,pdfOnly=false){
+  if(!files.length||importing)return;
+  importing=true;const failures=[];let result;
+  try{
+    for(const f of files){try{
+      if(pdfOnly&&extension(f.name)!=='pdf')throw new Error('This tool takes PDFs only.');
+      result=await openOne(f);
+    }catch(e){failures.push(f.name+': '+(e.message||'Could not open the file.'));}}
+    if(result)showDoc(result,true);
+    if(failures.length)notify(failures.join(' · '));
+  }finally{importing=false;}
+}
+async function sample(key='pdf'){
+  const info=sampleFiles[key];if(!info)return;
+  const [name,path]=info;
+  let found=docs.find(d=>d.name===name&&d.sample);
+  if(!found){const response=await fetch(asset(path));if(!response.ok)throw new Error('The sample could not load.');found=await openOne(new File([await response.blob()],name,{lastModified:1}),{sample:true});}
+  showDoc(found,true);
+}
+async function pinFile(d){
+  if(!d||d.sample||pinned(d))return;
+  const id=crypto.randomUUID(), meta={id,key:docKey(d),name:d.name,format:d.format,size:d.originalSize,modified:d.modified};
+  await setPin({...meta,file:d.source});d.pinId=id;pins.push(meta);display();notify('Pinned a local copy. Your original was not changed.');
+}
+async function openPin(meta){
+  const row=await getPin(meta.id);
+  if(!row?.file)throw new Error('The stored copy is no longer available.');
+  const file=new File([row.file],row.name,{lastModified:row.modified,type:row.file.type});
+  showDoc(await openOne(file,{pinId:row.id}));
 }
 const resetSearch=()=>{query='';matches=[];matchIndex=0;zoom=1;};
 function go(a){tool='';if(a!=='merge'&&a!=='in'||area!==a)queue=[];area=a;queueKind=a==='in'?'source':'pdf';display();}
-function navPage(p){if(!active)return;active.page=Math.max(1,Math.min(p,active.doc.numPages));tool='';display();}
+function navPage(p){if(!active)return;active.page=Math.max(1,Math.min(p,openCount(active)));setProgress(active);tool='';display();}
 function modal(title,inner,run,cancel=()=>{},label='Continue'){
   if(dlg.open)dlg.close();
   dlg.innerHTML='<form class="dlg"><div class="panel-head"><h2 id="dialog-title">'+title+'</h2></div>'+inner+'<p class="error" role="alert"></p><div class="actions"><button class="btn primary" type="submit">'+label+'</button>'+btn('Cancel','dialog-cancel','','ghost')+'</div></form>';
@@ -189,7 +303,18 @@ async function textPages(doc){
     pages.push(text.trim());
   }return pages;
 }
-const closeDoc=i=>{const old=docs[i];if(!old)return;const remove=()=>{docs.splice(i,1);if(old===active){active=docs[Math.min(i,docs.length-1)]||null;resetSearch();tool='';}display();void old.doc.destroy().catch(()=>{});};if(old.dirty)modal('Discard unsaved edits?','<p>Close '+esc(old.name)+' without saving this copy?</p>',async()=>remove(),undefined,'Discard and close');else remove();};
+const closeDoc=i=>{
+  const old=docs[i];if(!old)return;
+  const remove=()=>{
+    docs.splice(i,1);
+    if(old===active){
+      active=docs[Math.min(i,docs.length-1)]||null;
+      if(active)showDoc(active);else{resetSearch();tool='';go('files');}
+    }else display();
+    if(old.doc)void old.doc.destroy().catch(()=>{});
+  };
+  if(old.dirty)modal('Discard unsaved edits?','<p>Close '+esc(old.name)+' without saving this copy?</p>',async()=>remove(),undefined,'Discard and close');else remove();
+};
 async function runPrint(){
   const d=active, zone=$('#print-zone');zone.replaceChildren();document.body.classList.add('printing');notify('Preparing '+d.doc.numPages+' pages for printing…');
   try{for(let i=1;i<=d.doc.numPages;i++){const can=document.createElement('canvas');zone.append(can);await renderCanvas(await d.doc.getPage(i),can,1.45);}
@@ -215,15 +340,25 @@ function find(){
 }
 async function route(a,x){
   switch(a){
-    case 'home':case 'theme':case 'help':go(a);break;
-    case 'route':go(x);if(x==='sign'&&active&&!active.encrypted)await route('mark','signature');break;
+    case 'home':case 'theme':case 'help':case 'shelf':go(a);break;
+    case 'files':if(active)showDoc(active);else go('files');break;
+    case 'open-pdf':choose('open-pdf');break;
+    case 'filter':shelfFilter=x;display();screen.querySelector('[data-action="filter:'+x+'"]')?.focus();break;
+    case 'pin':await pinFile(docs[Number(x)]);break;
+    case 'pin-open':await openPin(pins[Number(x)]);break;
+    case 'unpin':{const item=pins[Number(x)];if(!item)return;modal('Remove pinned copy?','<p>Remove the shelf copy of '+esc(item.name)+'? The original file is not changed.</p>',async()=>{await removePin(item.id);pins=pins.filter(p=>p.id!==item.id);display();},undefined,'Remove copy');break;}
+    case 'item':navPage(+x);break;
+    case 'item-prev':navPage(active.page-1);break;
+    case 'item-next':navPage(active.page+1);break;
+    case 'reader-size':active.scale=Math.round(Math.max(.85,Math.min(2,active.scale+(x==='up'?.15:-.15)))*100)/100;display();break;
+    case 'route':go(x);if(x==='sign'&&pdfActive()&&!active.encrypted)await route('mark','signature');break;
     case 'open':choose('open');break;
-    case 'sample':await sample();break;
+    case 'sample':await sample(x||'pdf');break;
     case 'clear-recent':recent=[];persist('recent',recent);display();break;
-    case 'recent':{const item=recent[Number(x)], d=docs.find(v=>v.name===item.name);if(d){active=d;resetSearch();go('view');}else{notify('Choose the file again to reopen it.');choose('open');}break;}
+    case 'recent':{const item=recent[Number(x)], d=docs.find(v=>v.name===item?.name);if(d){showDoc(d);}else{notify('Choose the file again to reopen it.');choose('open');}break;}
     case 'mode':case 'palette':case 'density':prefs[a]=x;appearance();display();screen.querySelector('[data-action="'+a+':'+x+'"]')?.focus();break;
     case 'reset-theme':prefs={mode:'dark',palette:'ember',density:'comfortable'};appearance();display();break;
-    case 'tab':active=docs[Number(x)];resetSearch();tool='';display();break;
+    case 'tab':{const d=docs[Number(x)];if(d)showDoc(d,true);break;}
     case 'close-tab':closeDoc(Number(x));break;
     case 'next':navPage(active.page+1);break;
     case 'prev':navPage(active.page-1);break;
@@ -270,7 +405,13 @@ async function act(a,x,el){
   try{await route(a,x);}catch(e){notify(e.message||'Something went wrong.');}finally{busy=false;if(el)el.removeAttribute('aria-busy');}
 }
 document.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(b&&!b.disabled){const [a,x]=b.dataset.action.split(':');void act(a,x,b);}});
-picker.addEventListener('change',async()=>{const fs=[...picker.files];if(!fs.length)return;if(pickMode!=='open')addToQueue(fs);else await openFiles(fs);});
+picker.addEventListener('change',async()=>{const fs=[...picker.files];if(!fs.length)return;if(pickMode==='open'||pickMode==='open-pdf')await openFiles(fs,pickMode==='open-pdf');else addToQueue(fs);});
+screen.addEventListener('input',e=>{if(e.target.id==='shelf-search'){shelfQuery=e.target.value;$('#shelf-rows').innerHTML=shelfRows();}});
+screen.addEventListener('change',e=>{
+  if(e.target.id==='shelf-sort'){shelfSort=e.target.value;$('#shelf-rows').innerHTML=shelfRows();}
+  if(e.target.id==='reader-jump')navPage(Number(e.target.value));
+  if(e.target.id==='reader-fit'&&active){active.fit=e.target.value;display();}
+});
 for(const t of ['dragenter','dragover','dragleave','drop'])document.addEventListener(t,e=>{
   if(!e.dataTransfer?.types.includes('Files'))return;e.preventDefault();if(t==='dragenter')dragDepth++;
   if(t==='dragleave')dragDepth=Math.max(0,dragDepth-1);
@@ -280,12 +421,13 @@ for(const t of ['dragenter','dragover','dragleave','drop'])document.addEventList
 document.addEventListener('keydown',e=>{
   const k=e.key.toLowerCase(),mod=e.ctrlKey||e.metaKey;
   if(dlg.open)return;
-  if(mod&&['o','s','f','z','p'].includes(k)){
+  if(e.target.matches('.book-link')&&['enter',' '].includes(k)){e.preventDefault();e.target.click();return;}
+  if(mod&&(k==='o'||(pdfActive()&&['s','f','z','p'].includes(k)))){
     if(k==='z'&&e.target.matches('input,textarea'))return;
     e.preventDefault();const a={o:'open',s:'save',f:'find',z:e.shiftKey?'redo':'undo',p:'print'}[k];if(k==='o'||active)void act(a);
   }else if(k==='f3'&&active&&matches.length){e.preventDefault();matchIndex=(matchIndex+(e.shiftKey?-1:1)+matches.length)%matches.length;navPage(matches[matchIndex]);}
   else if(k==='escape'&&tool)void act('cancel-mark');
-  else if(active&&['view','edit','sign'].includes(area)&&['arrowleft','arrowright'].includes(k)&&!e.target.matches('input,textarea,select')){e.preventDefault();navPage(active.page+(k==='arrowleft'?-1:1));}
+  else if(active&&['view','edit','sign','files'].includes(area)&&['arrowleft','arrowright'].includes(k)&&!e.target.matches('input,textarea,select')){e.preventDefault();navPage(active.page+(k==='arrowleft'?-1:1));}
 });
 screen.addEventListener('pointerdown',e=>{
   const layer=e.target;if(!tool||layer.id!=='ink-layer'||!pageView||!active||e.button!==0||busy)return;
@@ -310,3 +452,4 @@ screen.addEventListener('pointercancel',()=>{if(drawing){drawing=null;display()}
 let resizeTimer;
 window.addEventListener('resize',()=>{if(active&&['view','edit','sign'].includes(area)){clearTimeout(resizeTimer);resizeTimer=setTimeout(display,130);}});
 display();
+void listPins().then(data=>{pins=data;if(['shelf','view','files'].includes(area))display();}).catch(()=>{});

@@ -36,13 +36,38 @@ function create(){
        for(let attempt=0;attempt<100;attempt++){const value=predicate();if(value)return value;await new Promise(r=>setTimeout(r,120));}
        throw new Error('Timed out waiting for the document workspace');
       };
-      const sample=await until(()=>document.querySelector('.banner [data-action=sample]'));
-      sample.click();
-      return until(()=>{
-       const canvas=document.querySelector('#pdf-page');
-       const status=document.querySelector('#read-status')?.textContent;
-       return canvas?.width>400&&status==='Page 1 of 3'&&canvas.getContext('2d').getImageData(4,4,1,1).data[3]===255&&status;
+      const click=async sel=>(await until(()=>document.querySelector(sel))).click();
+      const exact=async (id,msg)=>until(()=>document.querySelector(id)?.textContent===msg);
+      await click('[data-action="sample:pdf"]');
+      await until(()=>{
+        const canvas=document.querySelector('#pdf-page');
+        return canvas?.width>400&&document.querySelector('#read-status')?.textContent==='Page 1 of 3'&&canvas.getContext('2d').getImageData(4,4,1,1).data[3]===255;
       });
+      await click('nav [data-action="shelf"]');
+      await click('[data-action="sample:epub"]');
+      await exact('#file-status','Chapter 1 of 3');
+      if(!document.querySelector('.book-page')?.textContent.includes('The last lamp'))throw new Error('EPUB content missing');
+      await click('[data-action="item-next"]');
+      await exact('#file-status','Chapter 2 of 3');
+      await click('nav [data-action="shelf"]');
+      await click('[data-action="sample:cbz"]');
+      await exact('#file-status','Page 1 of 3');
+      await click('[data-action="item-next"]');
+      await exact('#file-status','Page 2 of 3');
+      if(document.querySelector('#reading-body img')?.naturalWidth<200)throw new Error('Comic image missing');
+      await click('nav [data-action="shelf"]');
+      const input=document.querySelector('#picker'), transfer=new DataTransfer();
+      transfer.items.add(new File(['Windows shelf smoke test'],'Shelf test.txt',{lastModified:1,type:'text/plain'}));
+      input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
+      await exact('#file-status','Preview ready');
+      await click('[data-action^="pin:"]');
+      await until(()=>document.querySelector('.pinned-indicator'));
+      await click('.tab.active [data-action^="close-tab:"]');
+      await click('nav [data-action="shelf"]');
+      await click('[data-action^="pin-open:"]');
+      await exact('#file-status','Preview ready');
+      if(document.querySelector('#reading-body pre')?.textContent!=='Windows shelf smoke test')throw new Error('Pinned content did not reopen');
+      return 'PDF, EPUB, CBZ and local shelf verified';
     })()`);
     await writeFile(marker,result);
    }catch(error){await writeFile(marker,'FAILED: '+error.message);}

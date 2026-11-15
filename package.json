@@ -1,8 +1,8 @@
 {
   "name": "pdf-forge",
   "productName": "PDF Forge",
-  "version": "0.1.0",
-  "description": "Ad-free local PDF workbench for Windows and the browser",
+  "version": "0.2.0",
+  "description": "Ad-free local file workspace for PDFs, ebooks, comics and more",
   "main": "desktop/main.cjs",
   "private": true,
   "scripts": {
@@ -19,5 +19,7 @@
   "devDependencies": {
     "electron": "45.3.2"
   },
-  "engines": { "node": ">=22.13.0" }
+  "engines": {
+    "node": ">=22.13.0"
+  }
 }
