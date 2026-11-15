@@ -1,0 +1,13 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {createRequire} from 'node:module';
+import { PDFDocument } from '../app/vendor/pdf-lib.mjs';
+import {pageRange,merge,extract,changePage,addMark,fromFiles,textDocx,compact} from '../app/pdf-tools.mjs';
+const require=createRequire(import.meta.url);
+const sample=new Uint8Array(await readFile(new URL('../app/art/summit-field-notes.pdf',import.meta.url)));
+test('page ranges preserve order and reject invalid input',()=>{assert.deepEqual(pageRange('3, 1–2',3),[2,0,1]);for(const s of ['0','4','3-1','abc','1,'])assert.throws(()=>pageRange(s,3));});
+test('merge and extract return loadable PDFs with correct counts',async()=>{const d=await PDFDocument.load(await merge([sample,sample]));assert.equal(d.getPageCount(),6);const p=await PDFDocument.load(await extract(sample,[1,0]));assert.equal(p.getPageCount(),2);});
+test('rotate, delete, reorder and text annotation save',async()=>{const a=await changePage(sample,0,'rotate');const b=await changePage(a,0,'down');const d=await PDFDocument.load(await addMark(b,1,{kind:'text',text:'Hello Forge!',x:200,y:350}));assert.equal(d.getPage(0).getRotation().angle,0);assert.equal(d.getPage(1).getRotation().angle,90);assert.equal((await PDFDocument.load(await changePage(b,1,'delete'))).getPageCount(),2);assert.equal(d.getPageCount(),3);});
+test('text-to-PDF paginates and compression never enlarges the input',async()=>{const f=new File(['hello\n'.repeat(90)],'notes.txt');const data=await fromFiles([f]);assert.ok((await PDFDocument.load(data)).getPageCount()>1);assert.ok((await compact(sample)).length<=sample.length);});
+test('Word export makes a real text-only DOCX without unescaped XML',async()=>{globalThis.JSZip=require(process.env.PDF_FORGE_MODULES ? process.env.PDF_FORGE_MODULES+'/jszip':'jszip');const z=await globalThis.JSZip.loadAsync(await textDocx(['Normal text & <important>','Next page']));const body=await z.file('word/document.xml').async('string');assert.match(body,/Normal text &amp; &lt;important&gt;/);assert.match(body,/w:type="page"/);});

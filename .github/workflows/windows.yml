@@ -1,0 +1,42 @@
+name: Package PDF Forge for Windows
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
+      - run: npm run vendor
+      - run: npm test
+      - run: ./scripts/package-win.ps1
+        shell: pwsh
+      - name: Check that the desktop executable stays up
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path 'out/PDF-Forge-win-x64/PDF Forge.exe'
+          $process = Start-Process $exe -PassThru
+          try {
+            if ($process.WaitForExit(8000)) {
+              throw "PDF Forge exited during launch with code $($process.ExitCode)"
+            }
+            if ($process.MainWindowHandle -eq 0) {
+              throw 'The Windows process did not create a visible desktop window.'
+            }
+          } finally {
+            if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PDF-Forge-Windows-x64
+          path: out/PDF-Forge-Windows-x64.zip
+          if-no-files-found: error

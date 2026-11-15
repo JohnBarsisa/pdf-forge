@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" data-mode="dark" data-palette="ember">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="PDF Forge is an ad-free workspace for PDFs that keeps your files on your device.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob: data:; worker-src 'self' blob:; connect-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>PDF Forge</title>
+<link rel="icon" href="./art/icon.png">
+<link rel="stylesheet" href="./style.css">
+<script src="./vendor/jszip.min.js" defer></script>
+<script type="module" src="./main.mjs"></script>
+</head>
+<body>
+<div id="app" class="shell">
+<aside class="side">
+  <button class="brand" data-action="home" aria-label="PDF Forge home"><img src="./art/icon.png" alt=""><span>PDF <b>Forge</b><small>DOCUMENT STUDIO</small></span></button>
+  <nav id="main-nav" aria-label="Workspace"></nav>
+  <div class="side-end" id="side-end"></div>
+  <footer class="side-foot"><i></i> Local processing <span>0.1</span></footer>
+</aside>
+<main class="main">
+  <header class="bar"><div class="crumb"><span>Workspace</span><span class="separator">/</span><strong id="crumb">Overview</strong></div><div class="bar-tools" id="bar-tools"></div></header>
+  <div id="screen" class="screen"></div>
+</main>
+</div>
+<input id="picker" type="file" accept=".pdf,application/pdf" multiple hidden>
+<dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<div id="print-zone" hidden></div>
+</body>
+</html>
