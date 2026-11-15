@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: npm install --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
+      - run: npm install --omit=optional --no-audit --no-fund
       - run: npm run vendor
       - run: npm test
       - run: ./scripts/package-win.ps1

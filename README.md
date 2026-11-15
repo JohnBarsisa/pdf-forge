@@ -19,7 +19,7 @@ npm run vendor
 npm run desktop
 ```
 
-`npm run web` serves the browser version at http://127.0.0.1:4173. Run `npm test` after vendoring. To build the portable Windows archive from source, run `pwsh -NoProfile -File scripts/package-win.ps1`. It validates the x64 Electron download against Electron’s release checksum. Output goes to `out/`.
+`npm run web` serves the browser version at http://127.0.0.1:4173. Run `npm test` after vendoring. To build the portable Windows archive from source, run `pwsh -NoProfile -File scripts/package-win.ps1`. It uses the installed x64 Electron runtime or verifies a direct download with Electron’s release checksum. Output goes to `out/`.
 
 ## Current scope
 
