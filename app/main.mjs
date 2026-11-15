@@ -20,7 +20,8 @@ compress:['Compress PDFs','Lossless PDF rewrite','#b6a2ff']
 };
 const palettes=[['ember','Ember','#f78b5e'],['copper','Copper','#dda36b'],['crimson','Crimson','#d35678'],['aubergine','Aubergine','#b485d4'],['forest','Forest','#63ae82'],['olive','Olive','#aab65b']];
 let prefs={mode:'dark',palette:'ember',density:'comfortable',...read('appearance',{})}, recent=read('recent',[]);
-let area='home', docs=[], active=null, queue=[], queueKind='pdf', tool='', targetTool='', draft='', token=0, readerJob, drawing=null, pageView=null;
+let area='home', docs=[], active=null, queue=[], queueKind='pdf', tool='', draft='', token=0, readerJob, drawing=null, pageView=null;
+let thumbsObserver;
 let zoom=1, query='', matches=[], matchIndex=0, busy=false, toastTimer, dragDepth=0;
 const screen=$('#screen'), dlg=$('#dialog'), picker=$('#picker');
 const btn=(label,action,i='',cls='',disabled=false)=>'<button type="button" class="btn '+cls+'" data-action="'+action+'" '+(disabled?'disabled':'')+'>'+ (i?icon(i):'') +'<span>'+label+'</span></button>';
@@ -91,6 +92,7 @@ function reader(){
 function display(){
   chrome();token++;const stamp=token;
   if(readerJob){readerJob.cancel();readerJob=null}
+  thumbsObserver?.disconnect();
   pageView=null;drawing=null;
   const reading=['view','edit','sign'].includes(area);
   screen.innerHTML=area==='home'?home():area==='theme'?setting():area==='help'?help():reading?reader():toolPage();
@@ -127,23 +129,22 @@ async function renderReader(d,stamp){
     const status=$('#read-status');if(status)status.textContent=query?(matches.length?'Match '+(matchIndex+1)+' of '+matches.length+' · “'+query+'”':'No text matches'):'Page '+d.page+' of '+d.doc.numPages;
     const thumbs=$('.thumb-list');
     thumbs?.querySelector('[aria-current=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});
-    const observer=new IntersectionObserver(items=>{for(const item of items)if(item.isIntersecting){const el=item.target;observer.unobserve(el);void d.doc.getPage(Number(el.dataset.thumb)).then(p=>stamp===token&&el.isConnected?renderCanvas(p,el,52/p.getViewport({scale:1}).width,1.25):null).catch(()=>{});}}, {root:thumbs,rootMargin:'65px'});
+    const observer=thumbsObserver=new IntersectionObserver(items=>{for(const item of items)if(item.isIntersecting){const el=item.target;observer.unobserve(el);void d.doc.getPage(Number(el.dataset.thumb)).then(p=>stamp===token&&el.isConnected?renderCanvas(p,el,52/p.getViewport({scale:1}).width,1.25):null).catch(()=>{});}}, {root:thumbs,rootMargin:'65px'});
     for(const el of thumbs?.querySelectorAll('canvas')||[])observer.observe(el);
-    thumbs?.addEventListener('scroll',()=>{if(stamp!==token)observer.disconnect()},{once:true});
   }catch(e){if(stamp===token&&e.name!=='RenderingCancelledException'){const x=$('#read-status');if(x)x.textContent='Could not render this page.';console.warn(e)}}
 }
 function remember(name,n){recent=[{name,meta:size(n)+' · Local file'},...recent.filter(r=>r.name!==name)].slice(0,6);persist('recent',recent);}
 async function openBytes(name,raw){
   const result=await loadJS(raw);
   const next={...result,name,raw,page:1,undo:[],redo:[],dirty:false};
-  docs.push(next);active=next;remember(name,raw.length);
+  docs.push(next);active=next;if(name!=='Summit Field Notes.pdf')remember(name,raw.length);
 }
 async function openFiles(files){
   if(!files.length)return;
   let failures=[];
   for(const f of files){try{if(!/\.pdf$/i.test(f.name)&&f.type!=='application/pdf')throw new Error('Choose a PDF file.');await openBytes(f.name,await pdf.bytes(f));}catch(e){failures.push(f.name+': '+(e.message||'Could not open PDF.'));}}
-  if(active){area=targetTool||(['edit','sign','merge','convert','out','compress'].includes(area)?area:'view');tool='';resetSearch();}
-  targetTool='';display();if(failures.length)notify(failures.join(' · '));
+  if(active){area=['edit','sign','merge','convert','out','compress'].includes(area)?area:'view';tool='';resetSearch();}
+  display();if(failures.length)notify(failures.join(' · '));
 }
 async function sample(){
   const found=docs.find(d=>d.name==='Summit Field Notes.pdf'&&d.sample);

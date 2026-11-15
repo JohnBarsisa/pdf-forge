@@ -16,9 +16,14 @@ if (Test-Path (Join-Path $bundled 'electron.exe')) {
   New-Item $work -ItemType Directory -Force | Out-Null
   Copy-Item -Path (Join-Path $bundled '*') -Destination $work -Recurse
 } else {
-  $checks = (Invoke-WebRequest -Uri "$releases/SHASUMS256.txt" -UseBasicParsing).Content
-  $expected = ($checks -split "`n" | Where-Object { $_ -match (" " + [regex]::Escape($zip) + "\s*$") } | Select-Object -First 1) -replace '\s+.*$', ''
-  if ($expected -notmatch '^[0-9a-fA-F]{64}$') { throw 'Electron package checksum not found.' }
+  $sumFile = Join-Path $out 'SHASUMS256.txt'
+  & curl.exe --silent --show-error --fail --location --retry 3 --output $sumFile "$releases/SHASUMS256.txt"
+  if ($LASTEXITCODE -ne 0) { throw 'Electron checksum manifest download failed.' }
+  $checks = Get-Content -LiteralPath $sumFile -Raw
+  $pattern = '(?im)^([0-9a-f]{64})[ 	]+\*?' + [regex]::Escape($zip) + '[ 	]*$'
+  $match = [regex]::Match($checks, $pattern)
+  if (!$match.Success) { throw 'Electron package checksum not found.' }
+  $expected = $match.Groups[1].Value
   & curl.exe --fail --location --retry 3 --output $runtime "$releases/$zip"
   if ($LASTEXITCODE -ne 0) { throw 'Electron runtime download failed.' }
   $actual = (Get-FileHash $runtime -Algorithm SHA256).Hash

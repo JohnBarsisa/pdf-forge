@@ -39,3 +39,9 @@ dialog{border:1px solid var(--line);border-radius:15px;width:min(94vw,540px);bac
 @media(prefers-reduced-motion:reduce){*,*::after{animation:none!important;transition:none!important}}
 @media print{body.printing>.shell,body.printing>dialog,body.printing>.toast{display:none!important}body.printing #print-zone{display:block!important}body.printing #print-zone canvas{display:block;width:100%;height:auto;break-after:page}body.printing #print-zone canvas:last-child{break-after:auto}body{margin:0;background:white}}
 .canvas-wrap #ink-layer{position:absolute;inset:0;background:transparent;pointer-events:none}.canvas-wrap.placing #ink-layer,.canvas-wrap.drawing #ink-layer{pointer-events:auto}.dropzone{width:100%}:root[data-density=compact] .toolbar{padding:4px;gap:2px}:root[data-density=compact] .nav-btn{min-height:31px;padding-block:5px}.preview-paper canvas{height:auto}.page-head>.row{flex:none}
+
+/* Blend the original forged emblem into the app without the poster lettering. */
+.brand-art{width:66%;background:radial-gradient(ellipse at 66% 65%,#93412755,transparent 68%);mask-image:none;right:0}
+.brand-art:before{content:"";position:absolute;inset:0 2% 0 14%;background:url("./art/forge-art.webp") center 52%/auto 98% no-repeat;mask-image:radial-gradient(ellipse 48% 73% at 55% 49%,#000 47%,transparent 100%)}
+.banner:after{background:linear-gradient(90deg,#261817 25%,#28191405 67%,#130d1055)}
+@media(max-width:610px){.brand-art{width:100%;opacity:.49}.brand-art:before{inset:0 -20% 0 24%}}
