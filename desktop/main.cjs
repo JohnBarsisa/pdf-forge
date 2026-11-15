@@ -27,6 +27,27 @@ function create(){
  win.webContents.on('will-navigate',(e,url)=>{
    if(![base+'/index.html',base+'/privacy.html',base+'/'].includes(url))e.preventDefault();
  });
+ const marker=process.env.PDF_FORGE_SMOKE_MARKER;
+ if (marker) {
+  win.webContents.once('did-finish-load',async()=>{
+   try {
+    const result=await win.webContents.executeJavaScript(`(async()=>{
+      const until=async(predicate)=>{
+       for(let attempt=0;attempt<100;attempt++){const value=predicate();if(value)return value;await new Promise(r=>setTimeout(r,120));}
+       throw new Error('Timed out waiting for the document workspace');
+      };
+      const sample=await until(()=>document.querySelector('.banner [data-action=sample]'));
+      sample.click();
+      return until(()=>{
+       const canvas=document.querySelector('#pdf-page');
+       const status=document.querySelector('#read-status')?.textContent;
+       return canvas?.width>400&&status==='Page 1 of 3'&&canvas.getContext('2d').getImageData(4,4,1,1).data[3]===255&&status;
+      });
+    })()`);
+    await writeFile(marker,result);
+   }catch(error){await writeFile(marker,'FAILED: '+error.message);}
+  });
+ }
  win.loadURL(base+'/index.html');
 }
 app.whenReady().then(()=>{

@@ -4,10 +4,17 @@ on:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      publish_preview:
+        type: boolean
+        default: false
+        description: Publish this build as GitHub prerelease v0.1.0
 permissions:
   contents: read
 jobs:
   package:
+    permissions:
+      contents: write
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -20,18 +27,21 @@ jobs:
       - run: npm test
       - run: ./scripts/package-win.ps1
         shell: pwsh
-      - name: Check that the desktop executable stays up
+      - name: Open and render the sample PDF in the Windows executable
         shell: pwsh
         run: |
           $exe = Resolve-Path 'out/PDF-Forge-win-x64/PDF Forge.exe'
+          $env:PDF_FORGE_SMOKE_MARKER = Join-Path $env:RUNNER_TEMP 'forge-smoke.txt'
           $process = Start-Process $exe -PassThru
           try {
-            if ($process.WaitForExit(8000)) {
-              throw "PDF Forge exited during launch with code $($process.ExitCode)"
+            for ($i=0; $i -lt 60 -and !(Test-Path $env:PDF_FORGE_SMOKE_MARKER); $i++) {
+              if ($process.HasExited) { throw "PDF Forge exited with code $($process.ExitCode)" }
+              Start-Sleep -Milliseconds 500
             }
-            if ($process.MainWindowHandle -eq 0) {
-              throw 'The Windows process did not create a visible desktop window.'
-            }
+            if (!(Test-Path $env:PDF_FORGE_SMOKE_MARKER)) { throw 'The app did not report a rendered PDF.' }
+            $result = Get-Content $env:PDF_FORGE_SMOKE_MARKER -Raw
+            if ($result -ne 'Page 1 of 3') { throw $result }
+            Write-Output "Verified: $result"
           } finally {
             if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
           }
@@ -40,3 +50,11 @@ jobs:
           name: PDF-Forge-Windows-x64
           path: out/PDF-Forge-Windows-x64.zip
           if-no-files-found: error
+      - name: Publish downloadable Windows prerelease
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_preview && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.1.0 out/PDF-Forge-Windows-x64.zip --target "${{ github.sha }}" --prerelease --title "PDF Forge 0.1.0 Windows Preview" --notes "Portable Windows x64 preview. Extract the entire ZIP and open PDF Forge.exe. This preview is unsigned. Includes PDF viewing, markup, page tools, local conversion, and appearance presets."
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release was not published.' }

@@ -19,7 +19,7 @@ sign:['Sign PDFs','Add a visual signature','#ff97bb'],
 compress:['Compress PDFs','Lossless PDF rewrite','#b6a2ff']
 };
 const palettes=[['ember','Ember','#f78b5e'],['copper','Copper','#dda36b'],['crimson','Crimson','#d35678'],['aubergine','Aubergine','#b485d4'],['forest','Forest','#63ae82'],['olive','Olive','#aab65b']];
-let prefs={mode:'dark',palette:'ember',density:'comfortable',...read('appearance',{})}, recent=read('recent',[]);
+let prefs={mode:'dark',palette:'ember',density:'comfortable',...read('appearance',{})}, recent=read('recent',[]).filter(x=>x.name!=='Summit Field Notes.pdf');
 let area='home', docs=[], active=null, queue=[], queueKind='pdf', tool='', draft='', token=0, readerJob, drawing=null, pageView=null;
 let thumbsObserver;
 let zoom=1, query='', matches=[], matchIndex=0, busy=false, toastTimer, dragDepth=0;
